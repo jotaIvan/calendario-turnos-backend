@@ -1,0 +1,14 @@
+# Archivos y directorios de entorno Python
+venv/
+__pycache__/
+*.pyc
+
+# Archivos de configuración local (no deben ir al repositorio público)
+.env
+
+# Archivos de sistema operativo (macOS)
+.DS_Store
+
+# Archivos de build y paquetes (si los generaras en esta carpeta)
+*.zip
+*.tar.gz
