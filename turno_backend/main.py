@@ -1,10 +1,43 @@
 # main.py
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, date # <-- Añade 'date' aquí
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware # Para permitir que React Native se conecte
 from dotenv import load_dotenv # Para cargar variables de entorno
 import os
+
+
+# --- Mapeo de Horarios por Tipo de Turno y Día de la Semana ---
+# Usaremos una estructura para facilitar la consulta
+HORARIOS_POR_TURNO = {
+    "Lunes a Viernes": {
+        "T1A": "05:45 - 13:45",
+        "T1B": "07:00 - 15:00",
+        "T2A": "13:45 - 21:45",
+        "T2B": "15:30 - 23:30",
+        "R": "Descanso", # Añade el horario para Descanso si no está en Excel
+        "HN": "Horas Nocturnas", # Añade para Horas Nocturnas si no está en Excel
+        "": "Día Libre / No Definido"
+    },
+    "Sábado": {
+        "T1A": "06:15 - 14:15",
+        "T1B": "07:00 - 15:00",
+        "T2A": "15:30 - 23:30",
+        "T2B": "15:00 - 23:00",
+        "R": "Descanso",
+        "HN": "Horas Nocturnas",
+        "": "Día Libre / No Definido"
+    },
+    "Domingos y Festivos": {
+        "T1A": "07:30 - 15:30",
+        "HN": "09:00 - 17:00", # Asumo que es el horario de HN para domingos/festivos
+        "T2A": "15:30 - 23:30",
+        "R": "Descanso",
+        "T1B": "No aplica", # Puedes poner "No aplica" o el horario si existe
+        "T2B": "No aplica", # Puedes poner "No aplica" o el horario si existe
+        "": "Día Libre / No Definido"
+    }
+}
 
 # Cargar variables de entorno del archivo .env
 load_dotenv()
@@ -44,6 +77,20 @@ app.add_middleware(
     allow_methods=["*"],  # Permite todos los métodos (GET, POST, etc.)
     allow_headers=["*"],  # Permite todos los encabezados
 )
+
+
+# Función auxiliar para determinar el tipo de día
+def get_tipo_dia(fecha: date):
+    # Asumiendo que los festivos no están en tu lógica actual.
+    # Si tienes una lista de festivos, la integrarías aquí.
+    if fecha.weekday() == 5: # Sábado es 5
+        return "Sábado"
+    elif fecha.weekday() == 6: # Domingo es 6
+        # Aquí necesitarías una lógica para verificar si es festivo también.
+        # Por ahora, solo distinguimos entre L-V, S, D.
+        return "Domingos y Festivos"
+    else: # Lunes a Viernes (0 a 4)
+        return "Lunes a Viernes"
 
 # --- Funciones de Lógica (Adaptadas de tu script original) ---
 
@@ -107,12 +154,33 @@ async def read_root():
     return {"message": "API de Turnos funcionando. Visita /docs para la documentación."}
 
 @app.get("/turnos")
-async def get_turnos():
-    """
-    Retorna todos los turnos disponibles cargados desde el archivo Excel.
-    """
-    turnos = cargar_turnos_desde_excel(EXCEL_FILE_PATH)
-    return turnos
+async def get_all_turnos():
+    try:
+        df_turnos = cargar_turnos_desde_excel()
+        turnos_data = {}
+        for index, row in df_turnos.iterrows():
+            fecha_str = row["FECHA"]
+            tipo_turno = row["J. VIDAL"] # Asumiendo que esta es la columna del turno
+
+            # Obtener el tipo de día (L-V, S, D/F) para la fecha
+            fecha_obj = datetime.strptime(fecha_str, "%Y-%m-%d").date()
+            tipo_dia = get_tipo_dia(fecha_obj)
+
+            # Obtener el horario basado en el tipo de día y el tipo de turno
+            horario = HORARIOS_POR_TURNO.get(tipo_dia, {}).get(tipo_turno, "Horario no disponible")
+
+            # Guardar tanto el tipo de turno como el horario
+            # Podemos devolver un objeto para cada fecha
+            turnos_data[fecha_str] = {
+                "tipo_turno": tipo_turno,
+                "horario": horario
+            }
+        return turnos_data
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=f"Archivo Excel de turnos no encontrado: {e}")
+    except Exception as e:
+        # Puedes loguear el error 'e' para depuración
+        raise HTTPException(status_code=500, detail=f"Error al cargar turnos: {e}")
 
 # --- Endpoint de prueba para notificaciones (futuro) ---
 # Este endpoint no envía notificaciones reales aún, solo simula un registro.
@@ -129,15 +197,3 @@ async def register_device(device_token: str):
     # Por ahora, solo lo imprimimos.
     return {"message": "Token de dispositivo registrado exitosamente."}
 
-
-# Notas importantes sobre el manejo de fechas:
-# Tu script original asumía que el mes estaba implícito o que FECHA era "dia/mes".
-# Si tu columna FECHA solo tiene el día, y el mes y año están en otras columnas,
-# la función `extraer_fecha` debe adaptarse.
-# El error más común al leer fechas es que Excel las almacena como números.
-# `str(row["FECHA"])` intenta convertirlo a string antes de hacer `split(',')`.
-# Si tu Excel tiene el mes y el año en columnas separadas y la columna "FECHA" solo tiene el día,
-# necesitaríamos ajustar `extraer_fecha` para combinar `row["AÑO"]`, `row["MES"]`, `row["FECHA"]`.
-# Por ejemplo, si tienes una columna "MES_NUMERO":
-# mes = int(row["MES_NUMERO"])
-# Puedes depurar esto si tienes problemas de fechas.
