@@ -156,7 +156,8 @@ async def read_root():
 @app.get("/turnos")
 async def get_all_turnos():
     try:
-        df_turnos = cargar_turnos_desde_excel()
+        df_turnos = cargar_turnos_desde_excel(EXCEL_FILE_PATH)
+        
         turnos_data = {}
         for index, row in df_turnos.iterrows():
             fecha_str = row["FECHA"]
