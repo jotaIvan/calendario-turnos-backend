@@ -156,13 +156,14 @@ async def read_root():
 @app.get("/turnos")
 async def get_all_turnos():
     try:
-        df_turnos = cargar_turnos_desde_excel(EXCEL_FILE_PATH)
-        
-        turnos_data = {}
-        for index, row in df_turnos.iterrows():
-            fecha_str = row["FECHA"]
-            tipo_turno = row["J. VIDAL"] # Asumiendo que esta es la columna del turno
+        # AQUÍ ESTÁ EL CAMBIO CLAVE
+        # Antes: df_turnos = cargar_turnos_desde_excel()
+        # Ahora: Pasa EXCEL_FILE_PATH y la función devuelve un diccionario.
+        turnos_dict = cargar_turnos_desde_excel(EXCEL_FILE_PATH)
 
+        turnos_data = {}
+        # Ahora itera directamente sobre el diccionario que te devuelve la función
+        for fecha_str, tipo_turno in turnos_dict.items():
             # Obtener el tipo de día (L-V, S, D/F) para la fecha
             fecha_obj = datetime.strptime(fecha_str, "%Y-%m-%d").date()
             tipo_dia = get_tipo_dia(fecha_obj)
@@ -171,7 +172,6 @@ async def get_all_turnos():
             horario = HORARIOS_POR_TURNO.get(tipo_dia, {}).get(tipo_turno, "Horario no disponible")
 
             # Guardar tanto el tipo de turno como el horario
-            # Podemos devolver un objeto para cada fecha
             turnos_data[fecha_str] = {
                 "tipo_turno": tipo_turno,
                 "horario": horario
@@ -182,10 +182,6 @@ async def get_all_turnos():
     except Exception as e:
         # Puedes loguear el error 'e' para depuración
         raise HTTPException(status_code=500, detail=f"Error al cargar turnos: {e}")
-
-# --- Endpoint de prueba para notificaciones (futuro) ---
-# Este endpoint no envía notificaciones reales aún, solo simula un registro.
-# La lógica real de envío de notificaciones Firebase se añadiría aquí o en un servicio aparte.
 
 @app.post("/register_device")
 async def register_device(device_token: str):
