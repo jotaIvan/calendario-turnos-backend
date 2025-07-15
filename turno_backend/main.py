@@ -196,9 +196,10 @@ async def read_root():
 
 @app.get("/turnos")
 async def get_all_turnos():
+    global turnos_completos
+         
     if not turnos_completos:
-        # Intenta recargar si está vacío (útil si el archivo aparece después del inicio)
-        global turnos_completos
+        # Intenta recargar si está vacío (útil si el archivo aparece después del inicio)       
         turnos_completos = cargar_turnos_desde_excel_full(EXCEL_FILE_PATH)
         if not turnos_completos:
              raise HTTPException(status_code=404, detail="Turnos no cargados o archivo no encontrado")
