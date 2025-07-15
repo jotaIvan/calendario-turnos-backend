@@ -99,73 +99,62 @@ def cargar_turnos_desde_excel_full(archivo_path: str) -> dict:
 
     turnos_data_completa = {}
     
-    # Asegurarse de que la columna 'FECHA' exista y no esté vacía
     if 'FECHA' not in df.columns:
         raise HTTPException(status_code=500, detail="Columna 'FECHA' no encontrada en el Excel.")
     
     # Si 'AÑO' no está o está vacía, intentamos inferirla del año actual o de la columna 'FECHA'
     if 'AÑO' not in df.columns or df['AÑO'].isnull().all():
-        print("Advertencia: Columna 'AÑO' no encontrada o vacía. Intentando inferir el año de la columna 'FECHA' o del año actual.")
-        # Intenta inferir el año del primer valor de FECHA si es un objeto de fecha
-        primer_fecha = df['FECHA'].dropna().iloc[0] if not df['FECHA'].dropna().empty else None
-        if isinstance(primer_fecha, (pd.Timestamp, datetime, date)):
-            anio_defecto = primer_fecha.year
-        else:
-            anio_defecto = datetime.now().year
-        df['AÑO'] = df['AÑO'].fillna(anio_defecto) # Rellena valores nulos en 'AÑO'
+        print("Advertencia: Columna 'AÑO' no encontrada o vacía. Intentando inferir el año del mes actual.")
+        anio_defecto = datetime.now().year # Usamos el año actual como fallback
+        df['AÑO'] = df['AÑO'].fillna(anio_defecto)
 
     for index, row in df.iterrows():
         try:
-            fecha_bruta = row['FECHA']
-            anio = int(row['AÑO']) # Convierte el año a entero
+            fecha_bruta = str(row['FECHA']).strip() # Asegúrate de que siempre sea un string y quita espacios
+            anio = int(row['AÑO'])
 
-            # Lógica mejorada para parsear la fecha, incluyendo formato de texto si es necesario
-            if isinstance(fecha_bruta, (pd.Timestamp, datetime, date)):
-                fecha_obj = fecha_bruta.date() # Convierte a objeto date
-            elif isinstance(fecha_bruta, str):
-                # Intenta parsear como "día/mes"
+            fecha_obj = None
+
+            # 1. Intentar parsear como fecha de Pandas/Python nativa (si ya viene bien del Excel)
+            if isinstance(row['FECHA'], (pd.Timestamp, datetime, date)):
+                fecha_obj = row['FECHA'].date()
+
+            # 2. Intentar parsear el formato "DD/MM, dia_semana_abreviado"
+            elif ',' in fecha_bruta and '/' in fecha_bruta:
                 try:
-                    dia_mes_partes = fecha_bruta.split('/')
-                    dia = int(dia_mes_partes[0].strip())
-                    mes = int(dia_mes_partes[1].strip())
+                    # Extraer "DD/MM" y el "dia_semana_abreviado"
+                    partes_fecha = fecha_bruta.split(',')[0].strip() # "18/12"
+                    dia_str, mes_str = partes_fecha.split('/')
+                    dia = int(dia_str)
+                    mes = int(mes_str)
                     fecha_obj = date(anio, mes, dia)
-                except (ValueError, IndexError):
-                    # Si falla, intenta parsear como una fecha completa si incluye el año
-                    try:
-                        fecha_obj = datetime.strptime(fecha_bruta, "%d/%m/%Y").date()
-                    except ValueError:
-                        # Si aún falla, asumimos que es solo el día y el mes actual
-                        # Esta parte es menos robusta y depende de la columna 'MES_NUMERO' si existe
-                        # o de la lógica de tu Excel.
-                        # Para tu caso con "Martes, 1" etc., la lógica de datetime.strptime("%A, %d", fecha_bruta) podría servir,
-                        # pero necesita el mes. La lógica original de J. Vidal era más compleja.
-                        # Dado tu uso, si es solo "dia", usaremos el mes del 'AÑO'
-                        print(f"Advertencia: Formato de fecha '{fecha_bruta}' inusual. Intentando inferir mes.")
-                        # Si tu columna FECHA es "Martes, 1" y no "1/1", necesitaríamos saber el mes.
-                        # Asumiendo que el Excel tiene una columna MES_NUMERO o que la fecha es un número de día
-                        # y el mes lo sacas de una cabecera de columna (que no es lo ideal).
-                        # Para simplificar y alinearse con tu código anterior:
-                        if isinstance(fecha_bruta, (int, float)): # Si el valor es solo el día numérico
-                            dia = int(fecha_bruta)
-                            # Esto es una suposición: si no hay mes en la columna FECHA,
-                            # tu Excel debería tener una columna de "MES_NUMERO" o similar.
-                            # Si no, asumimos el mes del año actual, lo cual es MUY FRÁGIL.
-                            mes = datetime.now().month # ¡Cuidado! Esto puede no ser lo que esperas.
-                            if "MES_NUMERO" in df.columns and pd.notna(row["MES_NUMERO"]):
-                                mes = int(row["MES_NUMERO"])
-                            fecha_obj = date(anio, mes, dia)
-                        else:
-                            print(f"Error: No se pudo parsear la fecha '{fecha_bruta}' en la fila {index}. Saltando.")
-                            continue # Saltar esta fila
-            else:
-                print(f"Error: Tipo de dato de fecha inesperado '{type(fecha_bruta)}' para '{fecha_bruta}' en la fila {index}. Saltando.")
-                continue # Saltar esta fila
+                except ValueError:
+                    print(f"Advertencia: No se pudo parsear 'DD/MM' de '{fecha_bruta}'.")
+            
+            # 3. Intentar parsear el formato "DD/MM/YYYY" si es posible
+            elif '/' in fecha_bruta and len(fecha_bruta.split('/')) == 3:
+                try:
+                    fecha_obj = datetime.strptime(fecha_bruta, "%d/%m/%Y").date()
+                except ValueError:
+                    print(f"Advertencia: No se pudo parsear como 'DD/MM/YYYY': '{fecha_bruta}'.")
+
+            # 4. Intentar parsear como solo día si 'MES_NUMERO' está disponible
+            elif isinstance(fecha_bruta, (int, float)): # Si el valor es solo el día numérico
+                dia = int(fecha_bruta)
+                mes = datetime.now().month # Valor por defecto, si no hay 'MES_NUMERO'
+                if "MES_NUMERO" in df.columns and pd.notna(row["MES_NUMERO"]):
+                    mes = int(row["MES_NUMERO"])
+                fecha_obj = date(anio, mes, dia)
+
+            if fecha_obj is None:
+                print(f"Error: No se pudo parsear la fecha '{fecha_bruta}' en la fila {index}. Saltando.")
+                continue # Saltar esta fila si la fecha no pudo ser parseada
 
             fecha_str = fecha_obj.strftime("%Y-%m-%d")
             
             turnos_del_dia = {}
             for persona in NOMBRES_PERSONAS:
-                tipo_turno_raw = row.get(persona, '') # Usa .get() para evitar KeyError si la columna no existe
+                tipo_turno_raw = row.get(persona, '')
                 tipo_turno = str(tipo_turno_raw).strip() if pd.notna(tipo_turno_raw) else ''
                 
                 tipo_dia = get_tipo_dia(fecha_obj)
@@ -178,8 +167,8 @@ def cargar_turnos_desde_excel_full(archivo_path: str) -> dict:
             turnos_data_completa[fecha_str] = turnos_del_dia
 
         except Exception as e:
-            print(f"Error procesando fila {index} (Fecha: {row.get('FECHA', 'N/A')}): {e}")
-            continue # Continúa con la siguiente fila si hay un error
+            print(f"Error general procesando fila {index} (Fecha: {row.get('FECHA', 'N/A')}): {e}")
+            continue
 
     print(f"Cargados {len(turnos_data_completa)} días de turnos para {len(NOMBRES_PERSONAS)} personas.")
     return turnos_data_completa
